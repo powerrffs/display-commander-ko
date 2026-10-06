@@ -151,8 +151,8 @@ void check_is_background() {
             if (settings::g_mainTabSettings.clip_cursor_enabled.GetValue()) {
                 if (app_in_background) {
                     LogInfo("Continuous monitoring: App moved to BACKGROUND");
-                    // Release cursor clipping when going to background
-                    display_commanderhooks::ClipCursor_Direct(nullptr);
+                    // Release cursor clipping when going to background (only if the clip is still ours)
+                    display_commanderhooks::ReleaseClipCursorIfOwned();
 
                     // Set cursor to default arrow when moving to background
                     display_commanderhooks::SetCursor_Direct(LoadCursor(nullptr, IDC_ARROW));
@@ -173,12 +173,18 @@ void check_is_background() {
                 display_commanderhooks::ClipCursor_Direct(nullptr);
             } else {
                 if (app_in_background) {
-                    display_commanderhooks::ClipCursor_Direct(nullptr);
+                    display_commanderhooks::ReleaseClipCursorIfOwned();
                 } else {
                     display_commanderhooks::RestoreClipCursor();
                 }
             }
         }
+    }
+
+    // Level-triggered repair: the clip rect is system-wide, so another process (e.g. a second game instance going
+    // to background a few ms after we became foreground) can wipe it. Re-apply while we are in foreground.
+    if (hwnd != nullptr && !app_in_background) {
+        display_commanderhooks::ReassertClipCursorIfNeeded();
     }
 
     // Apply window changes - the function will automatically determine what needs to be changed

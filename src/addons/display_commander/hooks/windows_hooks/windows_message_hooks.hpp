@@ -218,6 +218,8 @@ BOOL WINAPI ClipCursor_Detour(const RECT* lpRect);
 BOOL ClipCursor_Direct(const RECT* lpRect);
 void RestoreClipCursor();
 void ClipCursorToGameWindow();
+void ReleaseClipCursorIfOwned();
+void ReassertClipCursorIfNeeded();
 BOOL WINAPI GetCursorPos_Detour(LPPOINT lpPoint);
 // Spoof lpPoint (screen coords) to render-space screen coords when translate-mouse-position is on
 void ApplyTranslateMousePositionToCursorPos(LPPOINT lpPoint);
