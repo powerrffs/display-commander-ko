@@ -137,6 +137,34 @@ static std::atomic<bool> g_message_hooks_installed{false};
 static POINT s_last_cursor_position = {};
 static RECT s_last_clip_cursor = {};
 
+// Clip ownership tracking (multi-instance friendly).
+// The cursor clip rect is ONE system-wide resource shared by every process. When two games that both run
+// Display Commander sit side by side, an unconditional ClipCursor(nullptr) from the instance that just went to
+// background wipes the clip the other instance applied a few ms earlier. We therefore remember what this process
+// applied (requested rect + the rect the system actually reported back) so we only release what is ours, and so the
+// foreground instance can notice that its clip was overwritten and re-apply it.
+static SRWLOCK s_clip_owner_lock = SRWLOCK_INIT;
+static bool s_clip_owned = false;
+static RECT s_clip_requested = {};
+static RECT s_clip_effective = {};
+
+// Calls the real ClipCursor and records ownership.
+static BOOL CallClipCursorTracked(const RECT* lpRect) {
+    const BOOL ok = ClipCursor_Original != nullptr ? ClipCursor_Original(lpRect) : ClipCursor(lpRect);
+    RECT effective = {};
+    const bool have_effective = (lpRect != nullptr) && (ok != FALSE) && (GetClipCursor(&effective) != FALSE);
+    AcquireSRWLockExclusive(&s_clip_owner_lock);
+    if (have_effective) {
+        s_clip_owned = true;
+        s_clip_requested = *lpRect;
+        s_clip_effective = effective;
+    } else {
+        s_clip_owned = false;
+    }
+    ReleaseSRWLockExclusive(&s_clip_owner_lock);
+    return ok;
+}
+
 // Hook statistics array
 std::array<HookCallStats, HOOK_COUNT> g_hook_stats;
 
@@ -802,7 +830,74 @@ BOOL WINAPI GetKeyboardState_Detour(PBYTE lpKeyState) {
 BOOL ClipCursor_Direct(const RECT* lpRect) {
     CALL_GUARD_NO_TS();
     // Call the original Windows API directly, bypassing our hook
-    return ClipCursor_Original ? ClipCursor_Original(lpRect) : ClipCursor(lpRect);
+    return CallClipCursorTracked(lpRect);
+}
+
+// Release the system clip only if it is still the one this process applied.
+// If another process (e.g. a second game instance that just became foreground) already replaced it, leave it alone.
+void ReleaseClipCursorIfOwned() {
+    CALL_GUARD_NO_TS();
+    bool owned = false;
+    RECT effective = {};
+    AcquireSRWLockExclusive(&s_clip_owner_lock);
+    owned = s_clip_owned;
+    effective = s_clip_effective;
+    s_clip_owned = false;
+    ReleaseSRWLockExclusive(&s_clip_owner_lock);
+    if (!owned) {
+        return;
+    }
+    RECT current = {};
+    if (GetClipCursor(&current) == FALSE || EqualRect(&current, &effective) != FALSE) {
+        ClipCursor_Direct(nullptr);
+    } else {
+        LogInfo("ReleaseClipCursorIfOwned: clip rect was replaced by another process, not releasing");
+    }
+}
+
+// Level-triggered re-apply, called periodically while this process is in foreground.
+// Repairs the clip when another process released/overwrote it, and follows the game window when it moves.
+void ReassertClipCursorIfNeeded() {
+    CALL_GUARD_NO_TS();
+    HWND hwnd = g_last_swapchain_hwnd.load();
+    if (hwnd == nullptr || IsWindow(hwnd) == FALSE) {
+        return;
+    }
+    // Only while the game window itself is the foreground window (not e.g. another window of this process).
+    if (GetForegroundWindow_Direct() != hwnd) {
+        return;
+    }
+    RECT desired = {};
+    if (settings::g_mainTabSettings.clip_cursor_enabled.GetValue()) {
+        if (GetWindowRect(hwnd, &desired) == FALSE) {
+            return;
+        }
+    } else if (settings::g_mainTabSettings.unclip_cursor_enabled.GetValue()
+               || settings::g_experimentalTabSettings.test_block_mouse_clipcursor.GetValue()) {
+        return;
+    } else {
+        // Game-managed clipping: re-apply the last rect the game asked for (if any).
+        if (ShouldBlockMouseInput()) {
+            return;
+        }
+        desired = s_last_clip_cursor;
+    }
+    if ((desired.right - desired.left) == 0 || (desired.bottom - desired.top) == 0) {
+        return;
+    }
+    RECT current = {};
+    if (GetClipCursor(&current) == FALSE) {
+        return;
+    }
+    bool up_to_date = false;
+    AcquireSRWLockExclusive(&s_clip_owner_lock);
+    up_to_date = s_clip_owned && EqualRect(&desired, &s_clip_requested) != FALSE
+                 && EqualRect(&current, &s_clip_effective) != FALSE;
+    ReleaseSRWLockExclusive(&s_clip_owner_lock);
+    if (up_to_date) {
+        return;
+    }
+    ClipCursor_Direct(&desired);
 }
 
 // Function to call GetAsyncKeyState directly without going through the hook
@@ -857,6 +952,12 @@ BOOL WINAPI ClipCursor_Detour(const RECT* lpRect) {
     if (settings::g_mainTabSettings.clip_cursor_enabled.GetValue()) {
         return TRUE;
     }
+    // While in background never touch the system-wide clip from the game's own calls: the rect is remembered above
+    // and re-applied when we return to foreground. Previously this path turned every background ClipCursor call
+    // into ClipCursor(nullptr), which kept wiping the clip owned by the foreground application.
+    if (g_app_in_background.load(std::memory_order_acquire)) {
+        return TRUE;
+    }
     if (ShouldBlockMouseInput()) {
         lpRect = nullptr;
     }
@@ -865,7 +966,7 @@ BOOL WINAPI ClipCursor_Detour(const RECT* lpRect) {
     }
     g_hook_stats[HOOK_ClipCursor].increment_unsuppressed();
     // Call original function
-    return ClipCursor_Original != nullptr ? ClipCursor_Original(lpRect) : ClipCursor(lpRect);
+    return CallClipCursorTracked(lpRect);
 }
 
 // Hooked GetCursorPos function
