@@ -644,6 +644,58 @@ std::atomic<bool> g_streamline_dlssg_fg_enabled{false};
 std::atomic<bool> g_streamline_dlss_enabled{false};
 std::atomic<int> g_streamline_dlssg_requested_mode{-1};
 std::atomic<long long> g_dlssg_last_fg_evaluate_ns{0};
+std::atomic<int> g_dlssg_eval_multi_frame_count{-1};
+std::atomic<uint64_t> g_dlssg_fg_evaluate_count{0};
+std::atomic<int> g_dlssg_eval_enable_interp{-1};
+std::atomic<int> g_streamline_dlssg_requested_frames{-1};
+std::atomic<uint64_t> g_streamline_dlssg_setoptions_count{0};
+std::atomic<uint64_t> g_streamline_dlssg_getstate_count{0};
+std::atomic<uint64_t> g_streamline_dlssg_presented_sum{0};
+std::atomic<int> g_streamline_dlssg_last_status{-1};
+
+namespace {
+// Once every 2 s while an NGX FG feature exists: dump every signal FG on/off detection could use, so the right one
+// can be picked from a real log (Dynamic MFG at 1x leaves no other trace).
+void LogDlssgFgDiagnosticsThrottled(int fg_mode_result, int enable_interp_map, int mode_map, int mfc_map) {
+    static std::atomic<long long> s_last_log_ns{0};
+    static uint64_t s_prev_eval = 0, s_prev_setopt = 0, s_prev_getstate = 0, s_prev_presented = 0;
+    static uint64_t s_prev_frame_id = 0;
+    const long long now_ns = static_cast<long long>(utils::get_now_ns());
+    long long last = s_last_log_ns.load(std::memory_order_relaxed);
+    if (g_dlssg_enabled.load() == 0 && g_dlssg_last_fg_evaluate_ns.load(std::memory_order_relaxed) == 0) {
+        return;  // FG never seen
+    }
+    if (now_ns - last < 2LL * 1000 * 1000 * 1000
+        || !s_last_log_ns.compare_exchange_strong(last, now_ns, std::memory_order_relaxed)) {
+        return;
+    }
+    const uint64_t eval = g_dlssg_fg_evaluate_count.load(std::memory_order_relaxed);
+    const uint64_t setopt = g_streamline_dlssg_setoptions_count.load(std::memory_order_relaxed);
+    const uint64_t getstate = g_streamline_dlssg_getstate_count.load(std::memory_order_relaxed);
+    const uint64_t presented = g_streamline_dlssg_presented_sum.load(std::memory_order_relaxed);
+    const uint64_t frame_id = g_global_frame_id.load(std::memory_order_relaxed);
+    const long long last_eval_ns = g_dlssg_last_fg_evaluate_ns.load(std::memory_order_relaxed);
+    LogInfo("[FGDiag] fg_mode=%d | ngx: handles=%u evals/2s=%llu last_eval_ago_ms=%lld eval_mfc=%d eval_interp=%d | "
+            "map: interp=%d mode=%d mfc=%d | sl: req_mode=%d req_frames=%d setopt/2s=%llu getstate/2s=%llu "
+            "presented/2s=%llu status=%d | presents/2s=%llu",
+            fg_mode_result, g_dlssg_enabled.load(), static_cast<unsigned long long>(eval - s_prev_eval),
+            last_eval_ns != 0 ? (now_ns - last_eval_ns) / 1000000 : -1LL,
+            g_dlssg_eval_multi_frame_count.load(std::memory_order_relaxed),
+            g_dlssg_eval_enable_interp.load(std::memory_order_relaxed), enable_interp_map, mode_map, mfc_map,
+            g_streamline_dlssg_requested_mode.load(std::memory_order_relaxed),
+            g_streamline_dlssg_requested_frames.load(std::memory_order_relaxed),
+            static_cast<unsigned long long>(setopt - s_prev_setopt),
+            static_cast<unsigned long long>(getstate - s_prev_getstate),
+            static_cast<unsigned long long>(presented - s_prev_presented),
+            g_streamline_dlssg_last_status.load(std::memory_order_relaxed),
+            static_cast<unsigned long long>(frame_id - s_prev_frame_id));
+    s_prev_eval = eval;
+    s_prev_setopt = setopt;
+    s_prev_getstate = getstate;
+    s_prev_presented = presented;
+    s_prev_frame_id = frame_id;
+}
+}  // namespace
 
 // Unified game Reflex sleep mode params (D3D and Vulkan both write; read for Game Defaults)
 static GameReflexSleepModeParams g_game_reflex_sleep_mode_params = {};
@@ -1244,34 +1296,36 @@ DLSSGSummaryLite GetDLSSGSummaryLite() {
         is_fg_enabled = false;
     }
 
-    // Dynamic Multi Frame Generation: sl.dlss_g picks the multiplier per frame, including 1x (nothing generated).
-    // While it generates nothing it may stop evaluating the NGX FG feature, leaving DLSSG.EnableInterp stale at 1.
-    // Treat FG as off when the FG feature has not been evaluated recently.
-    const bool sl_dynamic_mfg =
-        g_streamline_dlssg_requested_mode.load(std::memory_order_relaxed) == kStreamlineDlssgModeDynamic;
-    if (is_fg_enabled && sl_dynamic_mfg) {
-        constexpr long long kFgEvaluateStaleNs = 250LL * 1000 * 1000;  // 250 ms
-        if (last_fg_eval_ns != 0
-            && static_cast<long long>(utils::get_now_ns()) - last_fg_eval_ns > kFgEvaluateStaleNs) {
-            is_fg_enabled = false;
-        }
+    // FG feature alive but not evaluated recently => nothing is being generated right now. Dynamic MFG at 1x keeps
+    // the feature (no ReleaseFeature) and the game keeps reporting FG as enabled, so this is the only on/off signal
+    // that reflects it. 250 ms only trips on real stalls (< 4 FPS) in fixed modes.
+    constexpr long long kFgEvaluateStaleNs = 250LL * 1000 * 1000;
+    const bool fg_eval_fresh =
+        last_fg_eval_ns != 0 && static_cast<long long>(utils::get_now_ns()) - last_fg_eval_ns <= kFgEvaluateStaleNs;
+    if (is_fg_enabled && last_fg_eval_ns != 0 && !fg_eval_fresh) {
+        is_fg_enabled = false;
     }
 
+    unsigned int map_mfc = 0;
+    const bool have_map_mfc = g_ngx_parameters.get_as_uint("DLSSG.MultiFrameCount", map_mfc);
     if (is_fg_enabled) {
-        unsigned int multi_frame_count;
-        if (g_ngx_parameters.get_as_uint("DLSSG.MultiFrameCount", multi_frame_count)) {
-            const int n = static_cast<int>(multi_frame_count) + 1;
-            if (sl_dynamic_mfg && n < 2) {
-                summary.fg_mode = kDlssGFgModeOff;  // dynamic MFG currently at 1x
-            } else {
-                summary.fg_mode = (n >= 2) ? n : kDlssGFgModeActiveUnknown;
-            }
+        // Prefer the count passed to the FG evaluate itself (the real per-frame value under Dynamic MFG); the shared
+        // map can hold the game's ignored numFramesToGenerate from slDLSSGSetOptions instead.
+        const int eval_mfc = g_dlssg_eval_multi_frame_count.load(std::memory_order_relaxed);
+        if (fg_eval_fresh && eval_mfc >= 0) {
+            const int n = eval_mfc + 1;
+            summary.fg_mode = (n >= 2) ? n : kDlssGFgModeOff;  // 0 frames to generate => effectively off
+        } else if (have_map_mfc) {
+            const int n = static_cast<int>(map_mfc) + 1;
+            summary.fg_mode = (n >= 2) ? n : kDlssGFgModeActiveUnknown;
         } else {
             summary.fg_mode = kDlssGFgModeActiveUnknown;
         }
     } else {
         summary.fg_mode = kDlssGFgModeOff;
     }
+    LogDlssgFgDiagnosticsThrottled(summary.fg_mode, enable_interp, dllssg_mode,
+                                   have_map_mfc ? static_cast<int>(map_mfc) : -1);
     return summary;
 }
 

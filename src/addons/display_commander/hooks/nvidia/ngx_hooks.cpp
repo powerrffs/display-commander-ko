@@ -1429,12 +1429,25 @@ static void UpdateDLSSGEnableInterpFromEvaluate(const NVSDK_NGX_Handle* InFeatur
 
     // Freshness marker for Dynamic MFG (see GetDLSSGSummaryLite): no FG evaluate for a while => nothing generated.
     g_dlssg_last_fg_evaluate_ns.store(static_cast<long long>(utils::get_now_ns()), std::memory_order_relaxed);
+    g_dlssg_fg_evaluate_count.fetch_add(1, std::memory_order_relaxed);
 
     int enable_interp = 0;
     if (NVSDK_NGX_SUCCEED(
             NVSDK_NGX_Parameter_GetI_Original(const_cast<NVSDK_NGX_Parameter*>(InParameters), "DLSSG.EnableInterp",
                                               &enable_interp))) {
         g_ngx_parameters.update_int("DLSSG.EnableInterp", enable_interp);
+        g_dlssg_eval_enable_interp.store(enable_interp, std::memory_order_relaxed);
+    } else {
+        g_dlssg_eval_enable_interp.store(-1, std::memory_order_relaxed);
+    }
+
+    unsigned int multi_frame_count = 0;
+    if (NVSDK_NGX_Parameter_GetUI_Original != nullptr
+        && NVSDK_NGX_SUCCEED(NVSDK_NGX_Parameter_GetUI_Original(const_cast<NVSDK_NGX_Parameter*>(InParameters),
+                                                                "DLSSG.MultiFrameCount", &multi_frame_count))) {
+        g_dlssg_eval_multi_frame_count.store(static_cast<int>(multi_frame_count), std::memory_order_relaxed);
+    } else {
+        g_dlssg_eval_multi_frame_count.store(-1, std::memory_order_relaxed);
     }
 }
 

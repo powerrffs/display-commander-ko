@@ -996,6 +996,17 @@ extern std::atomic<int> g_streamline_dlssg_requested_mode;
 extern std::atomic<long long> g_dlssg_last_fg_evaluate_ns;
 // sl::DLSSGMode::eDynamic (Dynamic Multi Frame Generation). Kept numeric so older Streamline headers still build.
 inline constexpr int kStreamlineDlssgModeDynamic = 3;
+// DLSSG.MultiFrameCount read straight from the parameters of the last FG EvaluateFeature call (-1 = unknown).
+// Unlike the shared g_ngx_parameters map, nothing else (e.g. slDLSSGSetOptions) can overwrite this value.
+extern std::atomic<int> g_dlssg_eval_multi_frame_count;
+// Diagnostics for FG on/off detection (logged periodically while an NGX FG feature exists).
+extern std::atomic<uint64_t> g_dlssg_fg_evaluate_count;          // FG EvaluateFeature calls
+extern std::atomic<int> g_dlssg_eval_enable_interp;               // DLSSG.EnableInterp at last FG evaluate (-1 = unknown)
+extern std::atomic<int> g_streamline_dlssg_requested_frames;      // numFramesToGenerate from slDLSSGSetOptions (-1)
+extern std::atomic<uint64_t> g_streamline_dlssg_setoptions_count;  // slDLSSGSetOptions calls
+extern std::atomic<uint64_t> g_streamline_dlssg_getstate_count;    // successful slDLSSGGetState calls
+extern std::atomic<uint64_t> g_streamline_dlssg_presented_sum;     // sum of DLSSGState::numFramesActuallyPresented
+extern std::atomic<int> g_streamline_dlssg_last_status;            // DLSSGState::status of last call (-1)
 
 // NGX Parameter Storage (SRWLOCK-protected mirrors for hooks and UI)
 extern UnifiedParameterMap g_ngx_parameters;  // Unified NGX parameters supporting all types

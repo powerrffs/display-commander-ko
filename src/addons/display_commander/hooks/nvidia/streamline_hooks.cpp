@@ -557,6 +557,9 @@ static sl::Result slDLSSGSetOptions_Detour(const sl::ViewportHandle& viewport, c
     if (result == sl::Result::eOk) {
         const int mode = static_cast<int>(options.mode);
         g_streamline_dlssg_requested_mode.store(mode, std::memory_order_relaxed);
+        g_streamline_dlssg_requested_frames.store(static_cast<int>(options.numFramesToGenerate),
+                                                  std::memory_order_relaxed);
+        g_streamline_dlssg_setoptions_count.fetch_add(1, std::memory_order_relaxed);
         // In eDynamic Streamline ignores numFramesToGenerate (games often leave it at 1). Writing it here would
         // overwrite the real dynamic count that sl.dlss_g passes to NGX, and the OSD would show a fixed 2x.
         if (mode != kStreamlineDlssgModeDynamic) {
@@ -602,6 +605,10 @@ static sl::Result slDLSSGGetState_Detour(const sl::ViewportHandle& viewport, sl:
     }
     const sl::Result result = slDLSSGGetState_Original(viewport, state, options);
     if (result == sl::Result::eOk) {
+        // Diagnostics only (see [FGDiag] log): numFramesActuallyPresented is the real output/app frame ratio.
+        g_streamline_dlssg_getstate_count.fetch_add(1, std::memory_order_relaxed);
+        g_streamline_dlssg_presented_sum.fetch_add(state.numFramesActuallyPresented, std::memory_order_relaxed);
+        g_streamline_dlssg_last_status.store(static_cast<int>(state.status), std::memory_order_relaxed);
         // Disabled for now, revisit
       //  UpdateNGXParamsFromDLSSGOptions(state, options);
     }
