@@ -1002,25 +1002,18 @@ DLSSGSummary GetDLSSGSummary() {
         summary.tonemapper_type = std::to_string(tonemapper);
     }
 
-    int dllssg_mode = -1;
-    int enable_interp = -1;
-    g_ngx_parameters.get_as_int("DLSSG.Mode", dllssg_mode);
-    g_ngx_parameters.get_as_int("DLSSG.EnableInterp", enable_interp);
-
-    bool is_fg_enabled = enable_interp == 1 && (dllssg_mode != -1 ? dllssg_mode >= 1 : true);
-
-    if (is_fg_enabled) {
-        // DLSS-G is enabled, check MultiFrameCount for mode
-        unsigned int multi_frame_count;
-        if (g_ngx_parameters.get_as_uint("DLSSG.MultiFrameCount", multi_frame_count)) {
+    // Same on/off + multiplier logic as the OSD (GetDLSSGSummaryLite), so both views always agree.
+    {
+        const int lite_fg_mode = GetDLSSGSummaryLite().fg_mode;
+        if (lite_fg_mode >= 2) {
             char buffer[16];
-            snprintf(buffer, sizeof(buffer), "%dx", multi_frame_count + 1);
+            snprintf(buffer, sizeof(buffer), "%dx", lite_fg_mode);
             summary.fg_mode = std::string(buffer);
-        } else {
+        } else if (lite_fg_mode == kDlssGFgModeActiveUnknown) {
             summary.fg_mode = "Active (mode unknown)";
+        } else {
+            summary.fg_mode = "Disabled";
         }
-    } else {
-        summary.fg_mode = "Disabled";
     }
 
     // Get NVIDIA Optical Flow Accelerator (OFA) status
@@ -1241,6 +1234,16 @@ DLSSGSummaryLite GetDLSSGSummaryLite() {
 
     bool is_fg_enabled = enable_interp == 1 && (dllssg_mode != -1 ? dllssg_mode >= 1 : true);
 
+    // g_ngx_parameters is one map shared by every NGX parameter object, so DLSSG.EnableInterp / DLSSG.Mode can be
+    // re-mirrored to 1 by unrelated Get/Set traffic after the FG feature was released (Streamline releases it when
+    // frame generation turns off). Once the NGX FG path has been seen working, the live FG handle count is the
+    // authoritative on/off signal.
+    const long long last_fg_eval_ns = g_dlssg_last_fg_evaluate_ns.load(std::memory_order_relaxed);
+    if (is_fg_enabled && last_fg_eval_ns != 0 && g_dlssg_enabled.load() == 0
+        && !g_streamline_dlssg_fg_enabled.load()) {
+        is_fg_enabled = false;
+    }
+
     // Dynamic Multi Frame Generation: sl.dlss_g picks the multiplier per frame, including 1x (nothing generated).
     // While it generates nothing it may stop evaluating the NGX FG feature, leaving DLSSG.EnableInterp stale at 1.
     // Treat FG as off when the FG feature has not been evaluated recently.
@@ -1248,9 +1251,8 @@ DLSSGSummaryLite GetDLSSGSummaryLite() {
         g_streamline_dlssg_requested_mode.load(std::memory_order_relaxed) == kStreamlineDlssgModeDynamic;
     if (is_fg_enabled && sl_dynamic_mfg) {
         constexpr long long kFgEvaluateStaleNs = 250LL * 1000 * 1000;  // 250 ms
-        const long long last_eval_ns = g_dlssg_last_fg_evaluate_ns.load(std::memory_order_relaxed);
-        if (last_eval_ns != 0
-            && static_cast<long long>(utils::get_now_ns()) - last_eval_ns > kFgEvaluateStaleNs) {
+        if (last_fg_eval_ns != 0
+            && static_cast<long long>(utils::get_now_ns()) - last_fg_eval_ns > kFgEvaluateStaleNs) {
             is_fg_enabled = false;
         }
     }
