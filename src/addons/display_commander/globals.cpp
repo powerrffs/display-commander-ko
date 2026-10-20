@@ -642,6 +642,8 @@ std::atomic<bool> g_dlssg_was_active_once{false};
 std::atomic<bool> g_ray_reconstruction_was_active_once{false};
 std::atomic<bool> g_streamline_dlssg_fg_enabled{false};
 std::atomic<bool> g_streamline_dlss_enabled{false};
+std::atomic<int> g_streamline_dlssg_requested_mode{-1};
+std::atomic<long long> g_dlssg_last_fg_evaluate_ns{0};
 
 // Unified game Reflex sleep mode params (D3D and Vulkan both write; read for Game Defaults)
 static GameReflexSleepModeParams g_game_reflex_sleep_mode_params = {};
@@ -1239,11 +1241,29 @@ DLSSGSummaryLite GetDLSSGSummaryLite() {
 
     bool is_fg_enabled = enable_interp == 1 && (dllssg_mode != -1 ? dllssg_mode >= 1 : true);
 
+    // Dynamic Multi Frame Generation: sl.dlss_g picks the multiplier per frame, including 1x (nothing generated).
+    // While it generates nothing it may stop evaluating the NGX FG feature, leaving DLSSG.EnableInterp stale at 1.
+    // Treat FG as off when the FG feature has not been evaluated recently.
+    const bool sl_dynamic_mfg =
+        g_streamline_dlssg_requested_mode.load(std::memory_order_relaxed) == kStreamlineDlssgModeDynamic;
+    if (is_fg_enabled && sl_dynamic_mfg) {
+        constexpr long long kFgEvaluateStaleNs = 250LL * 1000 * 1000;  // 250 ms
+        const long long last_eval_ns = g_dlssg_last_fg_evaluate_ns.load(std::memory_order_relaxed);
+        if (last_eval_ns != 0
+            && static_cast<long long>(utils::get_now_ns()) - last_eval_ns > kFgEvaluateStaleNs) {
+            is_fg_enabled = false;
+        }
+    }
+
     if (is_fg_enabled) {
         unsigned int multi_frame_count;
         if (g_ngx_parameters.get_as_uint("DLSSG.MultiFrameCount", multi_frame_count)) {
             const int n = static_cast<int>(multi_frame_count) + 1;
-            summary.fg_mode = (n >= 2) ? n : kDlssGFgModeActiveUnknown;
+            if (sl_dynamic_mfg && n < 2) {
+                summary.fg_mode = kDlssGFgModeOff;  // dynamic MFG currently at 1x
+            } else {
+                summary.fg_mode = (n >= 2) ? n : kDlssGFgModeActiveUnknown;
+            }
         } else {
             summary.fg_mode = kDlssGFgModeActiveUnknown;
         }

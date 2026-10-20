@@ -317,7 +317,10 @@ static void UpdateNGXParamsFromDLSSGOptions(const sl::DLSSGState& state, const s
     // Keep existing key updated when caller provides options (common in real titles).
     // Streamline does not expose mode/frames-to-generate in DLSSGState.
     if (options != nullptr) {
-        g_ngx_parameters.update_uint("DLSSG.MultiFrameCount", options->numFramesToGenerate);
+        // In eDynamic Streamline ignores numFramesToGenerate; the real per-frame count arrives via NGX parameters.
+        if (static_cast<int>(options->mode) != kStreamlineDlssgModeDynamic) {
+            g_ngx_parameters.update_uint("DLSSG.MultiFrameCount", options->numFramesToGenerate);
+        }
         g_ngx_parameters.update_int("DLSSG.Mode", static_cast<int>(options->mode));
     }
 
@@ -552,8 +555,14 @@ static sl::Result slDLSSGSetOptions_Detour(const sl::ViewportHandle& viewport, c
     }
     const sl::Result result = slDLSSGSetOptions_Original(viewport, options);
     if (result == sl::Result::eOk) {
-        g_ngx_parameters.update_uint("DLSSG.MultiFrameCount", options.numFramesToGenerate);
-        g_ngx_parameters.update_int("DLSSG.Mode", static_cast<int>(options.mode));
+        const int mode = static_cast<int>(options.mode);
+        g_streamline_dlssg_requested_mode.store(mode, std::memory_order_relaxed);
+        // In eDynamic Streamline ignores numFramesToGenerate (games often leave it at 1). Writing it here would
+        // overwrite the real dynamic count that sl.dlss_g passes to NGX, and the OSD would show a fixed 2x.
+        if (mode != kStreamlineDlssgModeDynamic) {
+            g_ngx_parameters.update_uint("DLSSG.MultiFrameCount", options.numFramesToGenerate);
+        }
+        g_ngx_parameters.update_int("DLSSG.Mode", mode);
     }
     return result;
 }

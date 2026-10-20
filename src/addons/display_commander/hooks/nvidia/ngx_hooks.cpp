@@ -1427,6 +1427,9 @@ static void UpdateDLSSGEnableInterpFromEvaluate(const NVSDK_NGX_Handle* InFeatur
         return;
     }
 
+    // Freshness marker for Dynamic MFG (see GetDLSSGSummaryLite): no FG evaluate for a while => nothing generated.
+    g_dlssg_last_fg_evaluate_ns.store(static_cast<long long>(utils::get_now_ns()), std::memory_order_relaxed);
+
     int enable_interp = 0;
     if (NVSDK_NGX_SUCCEED(
             NVSDK_NGX_Parameter_GetI_Original(const_cast<NVSDK_NGX_Parameter*>(InParameters), "DLSSG.EnableInterp",
