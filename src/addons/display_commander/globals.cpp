@@ -642,60 +642,8 @@ std::atomic<bool> g_dlssg_was_active_once{false};
 std::atomic<bool> g_ray_reconstruction_was_active_once{false};
 std::atomic<bool> g_streamline_dlssg_fg_enabled{false};
 std::atomic<bool> g_streamline_dlss_enabled{false};
-std::atomic<int> g_streamline_dlssg_requested_mode{-1};
 std::atomic<long long> g_dlssg_last_fg_evaluate_ns{0};
 std::atomic<int> g_dlssg_eval_multi_frame_count{-1};
-std::atomic<uint64_t> g_dlssg_fg_evaluate_count{0};
-std::atomic<int> g_dlssg_eval_enable_interp{-1};
-std::atomic<int> g_streamline_dlssg_requested_frames{-1};
-std::atomic<uint64_t> g_streamline_dlssg_setoptions_count{0};
-std::atomic<uint64_t> g_streamline_dlssg_getstate_count{0};
-std::atomic<uint64_t> g_streamline_dlssg_presented_sum{0};
-std::atomic<int> g_streamline_dlssg_last_status{-1};
-
-namespace {
-// Once every 2 s while an NGX FG feature exists: dump every signal FG on/off detection could use, so the right one
-// can be picked from a real log (Dynamic MFG at 1x leaves no other trace).
-void LogDlssgFgDiagnosticsThrottled(int fg_mode_result, int enable_interp_map, int mode_map, int mfc_map) {
-    static std::atomic<long long> s_last_log_ns{0};
-    static uint64_t s_prev_eval = 0, s_prev_setopt = 0, s_prev_getstate = 0, s_prev_presented = 0;
-    static uint64_t s_prev_frame_id = 0;
-    const long long now_ns = static_cast<long long>(utils::get_now_ns());
-    long long last = s_last_log_ns.load(std::memory_order_relaxed);
-    if (g_dlssg_enabled.load() == 0 && g_dlssg_last_fg_evaluate_ns.load(std::memory_order_relaxed) == 0) {
-        return;  // FG never seen
-    }
-    if (now_ns - last < 2LL * 1000 * 1000 * 1000
-        || !s_last_log_ns.compare_exchange_strong(last, now_ns, std::memory_order_relaxed)) {
-        return;
-    }
-    const uint64_t eval = g_dlssg_fg_evaluate_count.load(std::memory_order_relaxed);
-    const uint64_t setopt = g_streamline_dlssg_setoptions_count.load(std::memory_order_relaxed);
-    const uint64_t getstate = g_streamline_dlssg_getstate_count.load(std::memory_order_relaxed);
-    const uint64_t presented = g_streamline_dlssg_presented_sum.load(std::memory_order_relaxed);
-    const uint64_t frame_id = g_global_frame_id.load(std::memory_order_relaxed);
-    const long long last_eval_ns = g_dlssg_last_fg_evaluate_ns.load(std::memory_order_relaxed);
-    LogInfo("[FGDiag] fg_mode=%d | ngx: handles=%u evals/2s=%llu last_eval_ago_ms=%lld eval_mfc=%d eval_interp=%d | "
-            "map: interp=%d mode=%d mfc=%d | sl: req_mode=%d req_frames=%d setopt/2s=%llu getstate/2s=%llu "
-            "presented/2s=%llu status=%d | presents/2s=%llu",
-            fg_mode_result, g_dlssg_enabled.load(), static_cast<unsigned long long>(eval - s_prev_eval),
-            last_eval_ns != 0 ? (now_ns - last_eval_ns) / 1000000 : -1LL,
-            g_dlssg_eval_multi_frame_count.load(std::memory_order_relaxed),
-            g_dlssg_eval_enable_interp.load(std::memory_order_relaxed), enable_interp_map, mode_map, mfc_map,
-            g_streamline_dlssg_requested_mode.load(std::memory_order_relaxed),
-            g_streamline_dlssg_requested_frames.load(std::memory_order_relaxed),
-            static_cast<unsigned long long>(setopt - s_prev_setopt),
-            static_cast<unsigned long long>(getstate - s_prev_getstate),
-            static_cast<unsigned long long>(presented - s_prev_presented),
-            g_streamline_dlssg_last_status.load(std::memory_order_relaxed),
-            static_cast<unsigned long long>(frame_id - s_prev_frame_id));
-    s_prev_eval = eval;
-    s_prev_setopt = setopt;
-    s_prev_getstate = getstate;
-    s_prev_presented = presented;
-    s_prev_frame_id = frame_id;
-}
-}  // namespace
 
 // Unified game Reflex sleep mode params (D3D and Vulkan both write; read for Game Defaults)
 static GameReflexSleepModeParams g_game_reflex_sleep_mode_params = {};
@@ -1324,8 +1272,6 @@ DLSSGSummaryLite GetDLSSGSummaryLite() {
     } else {
         summary.fg_mode = kDlssGFgModeOff;
     }
-    LogDlssgFgDiagnosticsThrottled(summary.fg_mode, enable_interp, dllssg_mode,
-                                   have_map_mfc ? static_cast<int>(map_mfc) : -1);
     return summary;
 }
 

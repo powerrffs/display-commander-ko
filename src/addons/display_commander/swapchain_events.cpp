@@ -1129,10 +1129,12 @@ void HandleFpsLimiterPre(bool from_present_detour, bool frame_generation_aware =
         if (ngx_lite_snapshot.fg_mode >= 2) {
             target_fps /= static_cast<float>(ngx_lite_snapshot.fg_mode);
         }
-        static float last_target_fps = -1.0f;  // unset
+        // Keyed on the user's target, not the FG-divided one: with Dynamic MFG the multiplier changes many times per
+        // second and this line would flood the log.
+        static float last_target_fps_native = -1.0f;  // unset
 
-        if (last_target_fps != target_fps) {
-            last_target_fps = target_fps;
+        if (last_target_fps_native != target_fps_native) {
+            last_target_fps_native = target_fps_native;
             LogInfo("Target FPS: %f, Target FPS Native: %f from wrapper: %s lite.fg_mode: %d", target_fps,
                     target_fps_native, frame_generation_aware ? "true" : "false", ngx_lite_snapshot.fg_mode);
         }
