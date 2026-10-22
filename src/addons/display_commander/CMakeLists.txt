@@ -1,6 +1,6 @@
 # Version (single source of truth for addon; used by compile definitions and version.rc)
 set(DISPLAY_COMMANDER_VERSION_MAJOR 1)
-set(DISPLAY_COMMANDER_VERSION_MINOR 0)
+set(DISPLAY_COMMANDER_VERSION_MINOR 1)
 set(DISPLAY_COMMANDER_VERSION_PATCH 0)
 
 # Repository root (this file: src/addons/display_commander/CMakeLists.txt → ../../..).

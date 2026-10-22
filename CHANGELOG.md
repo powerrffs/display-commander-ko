@@ -26,6 +26,15 @@ Planned:
 - FG rate counter
 - Show override from NPI for DLSS presets. @adap
 
+## v1.1.0 (Display Commander KO - unofficial fork)
+Personal fork of pmnoxx/display-commander 1.0.0 final, maintained separately after upstream stopped updating.
+- [bugfix] [hooks] **Cursor clip with multiple instances** - Several game instances running Display Commander no longer release each other's `ClipCursor` rect (ownership tracking + re-apply while in foreground).
+- [bugfix] [ui] **FG multiplier on OSD with Dynamic MFG** - FG shows off when nothing is being generated (FG feature released or not evaluated recently) and uses the multiplier passed to the FG evaluate instead of the game's ignored `numFramesToGenerate`.
+- [ui] **Korean UI (main tab)** - Translation layer in the ReShade ImGui wrapper (`ui/i18n`); untranslated strings stay English.
+- [cleanup] **Quieter log** - `Target FPS` line is logged only when the user target changes.
+- [build] **x64 release only** - CI builds and publishes only the 64-bit release addon.
+- [cleanup] **LICENSE restored** - AGPL-3.0 text from upstream (2026-09-02), the last license published before upstream removed the file.
+
 ## v1.0.0 final
 - Bumped version to 1.0.0
 

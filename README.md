@@ -1,25 +1,33 @@
-# Display Commander
+# Display Commander KO
 
-[![Build](https://github.com/pmnoxx/display-commander/actions/workflows/build.yml/badge.svg)](https://github.com/pmnoxx/display-commander/actions/workflows/build.yml)
+> **비공식 개인 포크입니다.** [pmnoxx/display-commander](https://github.com/pmnoxx/display-commander) 1.0.0 final을 기반으로, 원본 업데이트가 멈춘 뒤 따로 관리하고 있습니다. 원작자는 Piotr Mikulski(pmnoxx)이며, 이 포크의 문제는 원작자에게 문의하지 마세요.
+>
+> Unofficial personal fork of [pmnoxx/display-commander](https://github.com/pmnoxx/display-commander) 1.0.0 final, maintained separately. Please don't report issues from this fork to the original author.
+
+### 이 포크에서 바뀐 것
+- 여러 게임 인스턴스를 띄웠을 때 서로 커서 가두기(ClipCursor)를 풀어버리던 문제 수정
+- Dynamic MFG 사용 시 FG가 꺼져도 OSD에 2x 등으로 남던 문제 수정
+- 메인 탭 한국어 UI (`src/addons/display_commander/ui/i18n`, ReShade 언어가 한국어여야 한글이 표시됨)
+- 로그 정리, x64 릴리스만 빌드
+- 자세한 내용은 [CHANGELOG.md](CHANGELOG.md)의 v1.1.0 항목 참고
+
+### 빌드
+GitHub Actions가 `main`에 푸시할 때마다 x64 릴리스를 빌드하고 이 저장소의 `Latest` 릴리스에 `zzz_display_commander.addon64`를 올립니다.
+로컬 빌드: Visual Studio 2022+ (C++ 데스크톱 개발), Developer Command Prompt에서
+`cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=MinSizeRel` → `cmake --build build --parallel`
+
+### 라이선스
+원본이 마지막으로 공개한 라이선스(AGPL-3.0, [LICENSE](LICENSE))를 따릅니다.
+
+---
+
+*아래는 원본 README입니다.*
 
 Display Commander is a ReShade addon that provides in-game control over display, windowing, performance, and audio. It adds a simple UI inside the ReShade overlay to adjust borderless/fullscreen behavior, window size and alignment, monitor targeting, FPS limiting (including background caps), and per-process audio volume/mute.
 
 Note: Applying window operations from the main thread can crash some apps. This addon performs them on a background thread.
 
-**✅ Version Requirement**: This addon requires **stable ReShade 6.6.2** or later. The addon is now fully compatible with stable ReShade releases.
-
-**Latest stable release**: [Latest Release](https://github.com/pmnoxx/display-commander/releases) - Compatible with ReShade 6.6.2
-
-## 📥 Latest Builds
-
-| Architecture | Download |
-|-------------|----------|
-| **x64 (64-bit)** | [zzz_display_commander.addon64](https://github.com/pmnoxx/display-commander/releases/latest/download/zzz_display_commander.addon64) |
-| **x86 (32-bit)** | [zzz_display_commander.addon32](https://github.com/pmnoxx/display-commander/releases/latest/download/zzz_display_commander.addon32) |
-
-**🐛 Latest Debug Build**: Debug build with PDB symbols for debugging and crash analysis: [Latest Debug Build](https://github.com/pmnoxx/display-commander/releases/tag/latest_debug).
-
-**🔨 Workflow artifacts**: Download from the [latest successful workflow run](https://github.com/pmnoxx/display-commander/actions/workflows/build.yml?query=branch%3Amain+is%3Asuccess) (requires GitHub account for artifact downloads).
+**✅ Version Requirement**: This addon requires **stable ReShade 6.6.2** or later.
 
 ## Features
 

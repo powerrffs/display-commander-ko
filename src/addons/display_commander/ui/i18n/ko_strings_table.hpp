@@ -898,7 +898,7 @@
 {"Version",
  "버전"},
 {"Version: %s",
- "버전: %s"},
+ "버전: %s (한국어 포크)"},
 {"Vertical offset of the OSD in the ReShade overlay (pixels from the top). 0 aligns the window top edge with the top of the overlay area. Positive moves down, negative moves up (e.g. to clear other on-screen text).",
  "ReShade 오버레이에서 OSD의 세로 위치 (위에서부터 픽셀). 0이면 창 위쪽이 오버레이 영역 위쪽에 맞춰집니다. 양수는 아래로, 음수는 위로 이동합니다 (예: 다른 화면 텍스트를 피할 때)."},
 {"VRAM unavailable (DXGI adapter or budget query failed).",
